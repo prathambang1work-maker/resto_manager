@@ -8,7 +8,8 @@ import {
   getAdminCredentials,
   updateAdminCredentials
 } from '../utils/auth'
-import { getKitchens, addKitchen, updateKitchen, deleteKitchen } from '../utils/storage'
+import { getKitchens, addKitchen, updateKitchen, deleteKitchen, getDashboardStats, getAnalytics } from '../utils/storage'
+import { formatINR } from '../utils/currency'
 
 export default function Admin() {
   const [authed, setAuthed] = useState(isAdminAuthenticated())
@@ -109,10 +110,22 @@ function AdminPanel({ onLogout }) {
   const [credError, setCredError] = useState('')
   const [credSuccess, setCredSuccess] = useState('')
 
+  const [revenueToday, setRevenueToday] = useState(0)
+  const [analytics, setAnalytics] = useState({
+    totalRevenueAllTime: 0,
+    mostOrderedItem: null,
+    mostOrderedQty: 0,
+    revenueByDay: []
+  })
+
   useEffect(() => {
     setKitchens(getKitchens())
     setCredEmail(getAdminCredentials().email)
+    setRevenueToday(getDashboardStats().revenueToday)
+    setAnalytics(getAnalytics())
   }, [])
+
+  const maxDay = Math.max(1, ...analytics.revenueByDay.map((d) => d.total))
 
   function handleLogout() {
     logoutAdmin()
@@ -178,6 +191,40 @@ function AdminPanel({ onLogout }) {
           Log out
         </Button>
       </header>
+
+      <Card eyebrow="Business insights" title="Revenue">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div>
+            <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-muted">Today</p>
+            <p className="mt-1 font-display text-2xl text-paper">{formatINR(revenueToday)}</p>
+          </div>
+          <div>
+            <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-muted">All time</p>
+            <p className="mt-1 font-display text-2xl text-paper">
+              {formatINR(analytics.totalRevenueAllTime)}
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-6 flex h-28 items-end gap-3">
+          {analytics.revenueByDay.map((day, idx) => (
+            <div key={idx} className="flex flex-1 flex-col items-center gap-2">
+              <div
+                className="w-full rounded-t-sm bg-ember/80 transition-all"
+                style={{ height: `${Math.max(4, (day.total / maxDay) * 100)}%` }}
+                title={formatINR(day.total)}
+              />
+              <span className="font-mono text-[10px] uppercase text-muted">{day.label}</span>
+            </div>
+          ))}
+        </div>
+      </Card>
+
+      <Card eyebrow="Business insights" title="Most ordered item" value={analytics.mostOrderedItem ?? '—'}>
+        {analytics.mostOrderedItem && (
+          <p className="mt-1 font-mono text-xs text-muted">{analytics.mostOrderedQty} sold all-time</p>
+        )}
+      </Card>
 
       <Card title="Kitchens">
         <form onSubmit={handleAddKitchen} className="flex gap-2">

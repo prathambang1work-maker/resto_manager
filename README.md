@@ -35,10 +35,15 @@ Password: admin123
 **Change this immediately after first login** (Admin → Admin credentials).
 
 From the Admin panel you can:
+- View revenue (today, all-time, 7-day trend) and the most-ordered item — this business data lives only here, not on the open Dashboard
 - Add, rename, or delete kitchens
 - Change the admin email/password
 
-**Security note:** this app has no backend, so the admin login is a client-side convenience gate only — credentials and the "logged in" flag are stored in the browser's `localStorage`, which is readable/editable via devtools. It stops casual access to kitchen setup but is **not real security**. Don't rely on it to protect anything sensitive; a genuine login needs a server-side auth system.
+**Security note:** this app has no backend, so the admin login is a client-side convenience gate only — credentials and the "logged in" flag are stored in the browser's `localStorage`, which is readable/editable via devtools. It stops casual access to revenue and kitchen setup but is **not real security**. Don't rely on it to protect anything sensitive; a genuine login needs a server-side auth system.
+
+## Dashboard (open, no login)
+
+Shows operational data only: orders today (count), active orders, and live kitchen workload. No revenue or financial figures — those are admin-only (see above).
 
 ## Kitchens & orders
 
