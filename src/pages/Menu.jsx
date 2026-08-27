@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react'
 import Card from '../components/Card'
 import Button from '../components/Button'
-import { getMenu, addMenuItem, updateMenuItem, deleteMenuItem } from '../utils/storage'
+import { formatINR } from '../utils/currency'
+import { getMenu, addMenuItem, updateMenuItem, deleteMenuItem, getKitchens } from '../utils/storage'
 
-const EMPTY_FORM = { name: '', price: '' }
+const EMPTY_FORM = { name: '', price: '', kitchenId: '' }
 
 export default function Menu() {
   const [menu, setMenu] = useState([])
+  const [kitchens, setKitchens] = useState([])
   const [form, setForm] = useState(EMPTY_FORM)
   const [errors, setErrors] = useState({})
   const [editingId, setEditingId] = useState(null)
@@ -14,7 +16,10 @@ export default function Menu() {
 
   useEffect(() => {
     setMenu(getMenu())
+    setKitchens(getKitchens())
   }, [])
+
+  const kitchenName = (id) => kitchens.find((k) => k.id === id)?.name ?? 'Unassigned'
 
   function validate(data) {
     const next = {}
@@ -28,19 +33,19 @@ export default function Menu() {
     const validationErrors = validate(form)
     setErrors(validationErrors)
     if (Object.keys(validationErrors).length > 0) return
-    setMenu(addMenuItem(form))
+    setMenu(addMenuItem({ ...form, kitchenId: form.kitchenId || null }))
     setForm(EMPTY_FORM)
   }
 
   function startEdit(item) {
     setEditingId(item.id)
-    setEditDraft({ name: item.name, price: item.price })
+    setEditDraft({ name: item.name, price: item.price, kitchenId: item.kitchenId || '' })
   }
 
   function saveEdit(id) {
     const validationErrors = validate(editDraft)
     if (Object.keys(validationErrors).length > 0) return
-    setMenu(updateMenuItem(id, editDraft))
+    setMenu(updateMenuItem(id, { ...editDraft, kitchenId: editDraft.kitchenId || null }))
     setEditingId(null)
   }
 
@@ -53,7 +58,9 @@ export default function Menu() {
       <header>
         <p className="font-mono text-xs uppercase tracking-[0.14em] text-ember">Menu</p>
         <h1 className="font-display text-3xl text-paper">The book</h1>
-        <p className="mt-1 text-sm text-paper/60">What's available to fire tonight.</p>
+        <p className="mt-1 text-sm text-paper/60">
+          What's available to fire tonight, and which kitchen handles it by default.
+        </p>
       </header>
 
       <Card title="Add menu item">
@@ -74,11 +81,11 @@ export default function Menu() {
 
           <div>
             <label className="mb-1 block font-mono text-[11px] uppercase tracking-wide text-muted">
-              Price
+              Price (₹)
             </label>
             <div className="relative">
               <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted">
-                $
+                ₹
               </span>
               <input
                 type="number"
@@ -86,14 +93,32 @@ export default function Menu() {
                 step="0.01"
                 value={form.price}
                 onChange={(e) => setForm((f) => ({ ...f, price: e.target.value }))}
-                className="w-full rounded-md border border-rail bg-raised py-2 pl-6 pr-3 text-sm text-paper focus:border-ember focus:outline-none"
+                className="w-full rounded-md border border-rail bg-raised py-2 pl-7 pr-3 text-sm text-paper focus:border-ember focus:outline-none"
               />
             </div>
             {errors.price && <p className="mt-1 text-xs text-chili">{errors.price}</p>}
           </div>
 
-          <div className="flex items-end sm:col-span-1">
-            <Button type="submit" variant="primary" className="w-full">
+          <div>
+            <label className="mb-1 block font-mono text-[11px] uppercase tracking-wide text-muted">
+              Kitchen
+            </label>
+            <select
+              value={form.kitchenId}
+              onChange={(e) => setForm((f) => ({ ...f, kitchenId: e.target.value }))}
+              className="w-full rounded-md border border-rail bg-raised px-3 py-2 text-sm text-paper focus:border-ember focus:outline-none"
+            >
+              <option value="">Unassigned</option>
+              {kitchens.map((k) => (
+                <option key={k.id} value={k.id}>
+                  {k.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="flex items-end sm:col-span-4">
+            <Button type="submit" variant="primary">
               Add to menu
             </Button>
           </div>
@@ -124,6 +149,18 @@ export default function Menu() {
                     onChange={(e) => setEditDraft((d) => ({ ...d, price: e.target.value }))}
                     className="w-full rounded-md border border-rail bg-raised px-3 py-2 text-sm text-paper focus:border-ember focus:outline-none"
                   />
+                  <select
+                    value={editDraft.kitchenId}
+                    onChange={(e) => setEditDraft((d) => ({ ...d, kitchenId: e.target.value }))}
+                    className="w-full rounded-md border border-rail bg-raised px-3 py-2 text-sm text-paper focus:border-ember focus:outline-none"
+                  >
+                    <option value="">Unassigned</option>
+                    {kitchens.map((k) => (
+                      <option key={k.id} value={k.id}>
+                        {k.name}
+                      </option>
+                    ))}
+                  </select>
                   <div className="flex gap-2">
                     <Button variant="primary" onClick={() => saveEdit(item.id)}>
                       Save
@@ -137,7 +174,10 @@ export default function Menu() {
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="font-display text-base text-paper">{item.name}</p>
-                    <p className="font-mono text-sm text-ember">${item.price.toFixed(2)}</p>
+                    <p className="font-mono text-sm text-ember">{formatINR(item.price)}</p>
+                    <p className="mt-0.5 font-mono text-[11px] text-muted">
+                      {kitchenName(item.kitchenId)}
+                    </p>
                   </div>
                   <div className="flex gap-2">
                     <Button variant="subtle" onClick={() => startEdit(item)}>

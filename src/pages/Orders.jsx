@@ -2,32 +2,44 @@ import { useEffect, useMemo, useState } from 'react'
 import Card from '../components/Card'
 import Button from '../components/Button'
 import OrderTicket from '../components/OrderTicket'
+import { formatINR } from '../utils/currency'
 import {
   getOrders,
   addOrder,
   deleteOrder,
   markOrderCompleted,
-  getMenu
+  getMenu,
+  getKitchens
 } from '../utils/storage'
 
-const EMPTY_FORM = { item: '', quantity: 1, price: '' }
+const EMPTY_FORM = { item: '', quantity: 1, price: '', kitchenId: '' }
 
 export default function Orders() {
   const [orders, setOrders] = useState([])
   const [menu, setMenu] = useState([])
+  const [kitchens, setKitchens] = useState([])
   const [form, setForm] = useState(EMPTY_FORM)
   const [errors, setErrors] = useState({})
-  const [filter, setFilter] = useState('all')
+  const [statusFilter, setStatusFilter] = useState('all')
+  const [kitchenFilter, setKitchenFilter] = useState('all')
 
   useEffect(() => {
     setOrders(getOrders())
     setMenu(getMenu())
+    setKitchens(getKitchens())
   }, [])
 
+  const kitchenName = (id) => kitchens.find((k) => k.id === id)?.name ?? 'Unassigned'
+
   const filteredOrders = useMemo(() => {
-    if (filter === 'all') return orders
-    return orders.filter((o) => o.status === filter)
-  }, [orders, filter])
+    return orders.filter((o) => {
+      const statusOk = statusFilter === 'all' || o.status === statusFilter
+      const kitchenOk =
+        kitchenFilter === 'all' ||
+        (kitchenFilter === 'unassigned' ? !o.kitchenId : o.kitchenId === kitchenFilter)
+      return statusOk && kitchenOk
+    })
+  }, [orders, statusFilter, kitchenFilter])
 
   function validate() {
     const next = {}
@@ -41,7 +53,7 @@ export default function Orders() {
   function handleSubmit(e) {
     e.preventDefault()
     if (!validate()) return
-    const next = addOrder(form)
+    const next = addOrder({ ...form, kitchenId: form.kitchenId || null })
     setOrders(next)
     setForm(EMPTY_FORM)
   }
@@ -49,7 +61,12 @@ export default function Orders() {
   function handleMenuPick(e) {
     const picked = menu.find((m) => m.id === e.target.value)
     if (picked) {
-      setForm((f) => ({ ...f, item: picked.name, price: picked.price }))
+      setForm((f) => ({
+        ...f,
+        item: picked.name,
+        price: picked.price,
+        kitchenId: picked.kitchenId || ''
+      }))
     }
   }
 
@@ -68,7 +85,9 @@ export default function Orders() {
       <header>
         <p className="font-mono text-xs uppercase tracking-[0.14em] text-ember">Orders</p>
         <h1 className="font-display text-3xl text-paper">Ticket rail</h1>
-        <p className="mt-1 text-sm text-paper/60">Fire new orders and clear them as they go out.</p>
+        <p className="mt-1 text-sm text-paper/60">
+          Fire new orders, route them to a kitchen, and clear them as they go out.
+        </p>
       </header>
 
       <Card title="New order">
@@ -88,10 +107,13 @@ export default function Orders() {
                 </option>
                 {menu.map((m) => (
                   <option key={m.id} value={m.id}>
-                    {m.name} — ${m.price.toFixed(2)}
+                    {m.name} — {formatINR(m.price)}
                   </option>
                 ))}
               </select>
+              <p className="mt-1 font-mono text-[10px] text-muted">
+                Picking an item auto-fills its price and default kitchen — you can still change either below.
+              </p>
             </div>
           )}
 
@@ -115,10 +137,10 @@ export default function Orders() {
             />
           </Field>
 
-          <Field label="Price" error={errors.price}>
+          <Field label="Price (₹)" error={errors.price}>
             <div className="relative">
               <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted">
-                $
+                ₹
               </span>
               <input
                 type="number"
@@ -126,14 +148,29 @@ export default function Orders() {
                 step="0.01"
                 value={form.price}
                 onChange={(e) => setForm((f) => ({ ...f, price: e.target.value }))}
-                className="w-full rounded-md border border-rail bg-raised py-2 pl-6 pr-3 text-sm text-paper focus:border-ember focus:outline-none"
+                className="w-full rounded-md border border-rail bg-raised py-2 pl-7 pr-3 text-sm text-paper focus:border-ember focus:outline-none"
               />
             </div>
           </Field>
 
+          <Field label="Kitchen" className="sm:col-span-4">
+            <select
+              value={form.kitchenId}
+              onChange={(e) => setForm((f) => ({ ...f, kitchenId: e.target.value }))}
+              className="w-full rounded-md border border-rail bg-raised px-3 py-2 text-sm text-paper focus:border-ember focus:outline-none sm:w-64"
+            >
+              <option value="">Unassigned</option>
+              {kitchens.map((k) => (
+                <option key={k.id} value={k.id}>
+                  {k.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+
           <div className="flex items-end justify-between gap-4 sm:col-span-4">
             <p className="font-mono text-sm text-muted">
-              Total <span className="text-paper">${total.toFixed(2)}</span>
+              Total <span className="text-paper">{formatINR(total)}</span>
             </p>
             <Button type="submit" variant="primary">
               Fire order
@@ -142,30 +179,49 @@ export default function Orders() {
         </form>
       </Card>
 
-      <div className="flex items-center gap-2">
-        {['all', 'pending', 'completed'].map((key) => (
-          <button
-            key={key}
-            onClick={() => setFilter(key)}
-            className={`rounded-full border px-3 py-1 font-mono text-[11px] uppercase tracking-wide transition-colors ${
-              filter === key
-                ? 'border-ember bg-ember/10 text-ember'
-                : 'border-rail text-muted hover:text-paper/80'
-            }`}
+      <div className="flex flex-wrap items-center gap-4">
+        <div className="flex items-center gap-2">
+          {['all', 'pending', 'completed'].map((key) => (
+            <button
+              key={key}
+              onClick={() => setStatusFilter(key)}
+              className={`rounded-full border px-3 py-1 font-mono text-[11px] uppercase tracking-wide transition-colors ${
+                statusFilter === key
+                  ? 'border-ember bg-ember/10 text-ember'
+                  : 'border-rail text-muted hover:text-paper/80'
+              }`}
+            >
+              {key}
+            </button>
+          ))}
+        </div>
+
+        {kitchens.length > 0 && (
+          <select
+            value={kitchenFilter}
+            onChange={(e) => setKitchenFilter(e.target.value)}
+            className="rounded-full border border-rail bg-raised px-3 py-1 font-mono text-[11px] uppercase tracking-wide text-muted focus:border-ember focus:outline-none"
           >
-            {key}
-          </button>
-        ))}
+            <option value="all">All kitchens</option>
+            <option value="unassigned">Unassigned</option>
+            {kitchens.map((k) => (
+              <option key={k.id} value={k.id}>
+                {k.name}
+              </option>
+            ))}
+          </select>
+        )}
       </div>
 
       <div className="flex flex-col gap-3">
         {filteredOrders.length === 0 ? (
-          <EmptyState filter={filter} />
+          <EmptyState filter={statusFilter} />
         ) : (
           filteredOrders.map((order) => (
             <OrderTicket
               key={order.id}
               order={order}
+              kitchenName={kitchenName(order.kitchenId)}
               onComplete={handleComplete}
               onDelete={handleDelete}
             />
@@ -191,7 +247,7 @@ function Field({ label, error, children, className = '' }) {
 function EmptyState({ filter }) {
   const copy =
     filter === 'all'
-      ? 'No orders yet. Fire the first one above.'
+      ? 'No orders match these filters yet.'
       : `No ${filter} orders right now.`
   return (
     <div className="rounded-lg border border-dashed border-rail px-6 py-10 text-center">

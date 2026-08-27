@@ -6,6 +6,8 @@ const LINKS = [
   { to: '/menu', label: 'Menu', icon: BookIcon }
 ]
 
+const ADMIN_LINK = { to: '/admin', label: 'Admin', icon: LockIcon }
+
 export default function Sidebar() {
   return (
     <aside className="hidden w-60 shrink-0 flex-col border-r border-rail bg-panel px-4 py-6 md:flex">
@@ -45,14 +47,43 @@ export default function Sidebar() {
         ))}
       </nav>
 
-      <div className="mt-auto rounded-lg border border-rail bg-raised/60 px-3 py-3">
-        <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted">Status</p>
-        <p className="mt-1 flex items-center gap-2 text-sm text-paper/80">
-          <span className="h-1.5 w-1.5 rounded-full bg-sage" />
-          Line running
-        </p>
+      <div className="mt-auto flex flex-col gap-3">
+        <NavLink
+          to={ADMIN_LINK.to}
+          className={({ isActive }) =>
+            `group flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors ${
+              isActive
+                ? 'bg-ember/12 text-ember'
+                : 'text-paper/50 hover:bg-raised hover:text-paper/80'
+            }`
+          }
+        >
+          {({ isActive }) => (
+            <>
+              <LockIcon className={`h-4 w-4 ${isActive ? 'text-ember' : 'text-muted group-hover:text-paper/70'}`} />
+              {ADMIN_LINK.label}
+            </>
+          )}
+        </NavLink>
+
+        <div className="rounded-lg border border-rail bg-raised/60 px-3 py-3">
+          <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted">Status</p>
+          <p className="mt-1 flex items-center gap-2 text-sm text-paper/80">
+            <span className="h-1.5 w-1.5 rounded-full bg-sage" />
+            Line running
+          </p>
+        </div>
       </div>
     </aside>
+  )
+}
+
+function LockIcon({ className }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className}>
+      <rect x="5" y="10.5" width="14" height="9" rx="1.6" stroke="currentColor" strokeWidth="1.6" />
+      <path d="M8 10.5V7.5a4 4 0 0 1 8 0v3" stroke="currentColor" strokeWidth="1.6" />
+    </svg>
   )
 }
 

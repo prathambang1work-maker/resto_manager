@@ -1,12 +1,13 @@
 import Button from './Button'
 import { orderTotal } from '../utils/storage'
+import { formatINR } from '../utils/currency'
 
 /**
  * OrderTicket — the app's signature element. Styled after a kitchen
  * order ticket / receipt: perforated edge, monospace figures, a stamped
  * status. This is how a line cook actually reads an order.
  */
-export default function OrderTicket({ order, onComplete, onDelete }) {
+export default function OrderTicket({ order, kitchenName, onComplete, onDelete }) {
   const isPending = order.status === 'pending'
   const time = new Date(order.timestamp).toLocaleTimeString(undefined, {
     hour: '2-digit',
@@ -34,11 +35,17 @@ export default function OrderTicket({ order, onComplete, onDelete }) {
           </div>
           <p className="mt-1 font-mono text-xs text-muted">
             #{order.id.split('_')[1]} · {order.quantity}× · fired {time}
+            {kitchenName && (
+              <>
+                {' · '}
+                <span className="text-paper/60">{kitchenName}</span>
+              </>
+            )}
           </p>
         </div>
 
         <div className="flex items-center justify-between gap-4 sm:justify-end">
-          <p className="font-mono text-lg text-paper">${orderTotal(order).toFixed(2)}</p>
+          <p className="font-mono text-lg text-paper">{formatINR(orderTotal(order))}</p>
           <div className="flex gap-2">
             {isPending && (
               <Button variant="primary" onClick={() => onComplete(order.id)}>
