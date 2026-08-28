@@ -2,21 +2,41 @@ import { useEffect, useState } from 'react'
 import Card from '../components/Card'
 import Button from '../components/Button'
 import { formatINR } from '../utils/currency'
-import { getMenu, addMenuItem, updateMenuItem, deleteMenuItem, getKitchens } from '../utils/storage'
+import {
+  getMenu,
+  addMenuItem,
+  updateMenuItem,
+  deleteMenuItem,
+  getKitchens,
+  subscribeToTable
+} from '../utils/storage'
 
 const EMPTY_FORM = { name: '', price: '', kitchenId: '' }
 
 export default function Menu() {
   const [menu, setMenu] = useState([])
   const [kitchens, setKitchens] = useState([])
+  const [loading, setLoading] = useState(true)
   const [form, setForm] = useState(EMPTY_FORM)
   const [errors, setErrors] = useState({})
   const [editingId, setEditingId] = useState(null)
   const [editDraft, setEditDraft] = useState(EMPTY_FORM)
 
+  async function refreshMenu() {
+    setMenu(await getMenu())
+  }
+
   useEffect(() => {
-    setMenu(getMenu())
-    setKitchens(getKitchens())
+    async function init() {
+      const [m, k] = await Promise.all([getMenu(), getKitchens()])
+      setMenu(m)
+      setKitchens(k)
+      setLoading(false)
+    }
+    init()
+
+    const unsub = subscribeToTable('menu_items', refreshMenu)
+    return unsub
   }, [])
 
   const kitchenName = (id) => kitchens.find((k) => k.id === id)?.name ?? 'Unassigned'
@@ -28,12 +48,12 @@ export default function Menu() {
     return next
   }
 
-  function handleSubmit(e) {
+  async function handleSubmit(e) {
     e.preventDefault()
     const validationErrors = validate(form)
     setErrors(validationErrors)
     if (Object.keys(validationErrors).length > 0) return
-    setMenu(addMenuItem({ ...form, kitchenId: form.kitchenId || null }))
+    setMenu(await addMenuItem({ ...form, kitchenId: form.kitchenId || null }))
     setForm(EMPTY_FORM)
   }
 
@@ -42,15 +62,15 @@ export default function Menu() {
     setEditDraft({ name: item.name, price: item.price, kitchenId: item.kitchenId || '' })
   }
 
-  function saveEdit(id) {
+  async function saveEdit(id) {
     const validationErrors = validate(editDraft)
     if (Object.keys(validationErrors).length > 0) return
-    setMenu(updateMenuItem(id, { ...editDraft, kitchenId: editDraft.kitchenId || null }))
+    setMenu(await updateMenuItem(id, { ...editDraft, kitchenId: editDraft.kitchenId || null }))
     setEditingId(null)
   }
 
-  function handleDelete(id) {
-    setMenu(deleteMenuItem(id))
+  async function handleDelete(id) {
+    setMenu(await deleteMenuItem(id))
   }
 
   return (
@@ -126,7 +146,9 @@ export default function Menu() {
       </Card>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        {menu.length === 0 ? (
+        {loading ? (
+          <p className="text-sm text-muted sm:col-span-2">Loading…</p>
+        ) : menu.length === 0 ? (
           <div className="rounded-lg border border-dashed border-rail px-6 py-10 text-center sm:col-span-2">
             <p className="font-display text-lg text-paper/70">The book is empty. Add your first item.</p>
           </div>

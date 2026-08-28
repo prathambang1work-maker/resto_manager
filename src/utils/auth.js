@@ -1,65 +1,49 @@
 // ---------------------------------------------------------------------------
 // auth.js
-// Client-side admin login gate for the /admin section.
-//
-// IMPORTANT: This is a convenience gate, not real security. Credentials and
-// the "logged in" flag both live in localStorage, fully readable/editable
-// via browser devtools. It stops casual access to kitchen/credential
-// settings but must never guard anything sensitive. A genuine login needs
-// a real backend with server-side auth.
+// Thin wrapper around Supabase Auth. Real server-side authentication —
+// unlike the earlier localStorage-based gate, credentials are never stored
+// or checked in the browser. Roles ('staff' | 'admin') live in the
+// `profiles` table, one row per auth user, set up via the Supabase
+// dashboard (see README).
 // ---------------------------------------------------------------------------
 
-const CREDENTIALS_KEY = 'embercard:adminCredentials'
-const SESSION_KEY = 'embercard:adminSession'
+import { supabase } from './supabaseClient'
 
-const DEFAULT_CREDENTIALS = {
-  email: 'admin@embercard.app',
-  password: 'admin123'
+export async function signIn(email, password) {
+  const { data, error } = await supabase.auth.signInWithPassword({ email, password })
+  if (error) return { ok: false, error: error.message }
+  return { ok: true, user: data.user }
 }
 
-function safeParse(raw, fallback) {
-  if (!raw) return fallback
-  try {
-    return JSON.parse(raw)
-  } catch (err) {
-    console.error('auth: failed to parse stored value', err)
-    return fallback
+export async function signOut() {
+  await supabase.auth.signOut()
+}
+
+export async function getCurrentSession() {
+  const { data } = await supabase.auth.getSession()
+  return data.session
+}
+
+export async function getProfile(userId) {
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('id, email, role, kitchen_id')
+    .eq('id', userId)
+    .single()
+  if (error) {
+    console.error('auth: failed to load profile', error)
+    return null
   }
+  return data
 }
 
-export function getAdminCredentials() {
-  const existing = localStorage.getItem(CREDENTIALS_KEY)
-  if (existing === null) {
-    localStorage.setItem(CREDENTIALS_KEY, JSON.stringify(DEFAULT_CREDENTIALS))
-    return DEFAULT_CREDENTIALS
-  }
-  return safeParse(existing, DEFAULT_CREDENTIALS)
+export function onAuthStateChange(callback) {
+  return supabase.auth.onAuthStateChange((_event, session) => callback(session))
 }
 
-export function updateAdminCredentials({ email, password }) {
-  const current = getAdminCredentials()
-  const next = {
-    email: email?.trim() ? email.trim() : current.email,
-    password: password ? password : current.password
-  }
-  localStorage.setItem(CREDENTIALS_KEY, JSON.stringify(next))
-  return next
-}
-
-export function isAdminAuthenticated() {
-  return localStorage.getItem(SESSION_KEY) === 'true'
-}
-
-export function loginAdmin(email, password) {
-  const creds = getAdminCredentials()
-  const ok =
-    email?.trim().toLowerCase() === creds.email.toLowerCase() && password === creds.password
-  if (ok) {
-    localStorage.setItem(SESSION_KEY, 'true')
-  }
-  return ok
-}
-
-export function logoutAdmin() {
-  localStorage.removeItem(SESSION_KEY)
+/** Update the currently signed-in user's own password. */
+export async function updateOwnPassword(newPassword) {
+  const { error } = await supabase.auth.updateUser({ password: newPassword })
+  if (error) return { ok: false, error: error.message }
+  return { ok: true }
 }

@@ -1,195 +1,197 @@
 // ---------------------------------------------------------------------------
 // storage.js
-// Single source of truth for persistence + business logic.
-// Nothing in components/ or pages/ should touch localStorage directly.
+// Single source of truth for data access + business logic. Backed by
+// Supabase (Postgres) instead of localStorage, so every device sees the
+// same orders/menu/kitchens automatically. All functions are async.
 // ---------------------------------------------------------------------------
 
-const ORDERS_KEY = 'embercard:orders'
-const MENU_KEY = 'embercard:menu'
-const KITCHENS_KEY = 'embercard:kitchens'
+import { supabase } from './supabaseClient'
 
-/** Safe JSON parse with a fallback value on any failure. */
-function safeParse(raw, fallback) {
-  if (!raw) return fallback
-  try {
-    const parsed = JSON.parse(raw)
-    return Array.isArray(parsed) ? parsed : fallback
-  } catch (err) {
-    console.error('storage: failed to parse localStorage value', err)
-    return fallback
-  }
+function logError(context, error) {
+  if (error) console.error(`storage: ${context}`, error)
 }
-
-function safeWrite(key, value) {
-  try {
-    localStorage.setItem(key, JSON.stringify(value))
-    return true
-  } catch (err) {
-    console.error(`storage: failed to write key "${key}"`, err)
-    return false
-  }
-}
-
-function generateId(prefix) {
-  return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`
-}
-
-// ---------------------------------------------------------------------------
-// Seed data — lets a fresh install feel real instead of empty on first run.
-// ---------------------------------------------------------------------------
-
-const SEED_KITCHENS = [
-  { id: 'kitchen_1', name: 'Kitchen 1' },
-  { id: 'kitchen_2', name: 'Kitchen 2' },
-  { id: 'kitchen_3', name: 'Kitchen 3' }
-]
-
-const SEED_MENU = [
-  { id: generateId('item'), name: 'Charred Corn Tacos', price: 180, kitchenId: 'kitchen_1' },
-  { id: generateId('item'), name: 'Smoked Brisket Bowl', price: 320, kitchenId: 'kitchen_2' },
-  { id: generateId('item'), name: 'Wood-Fired Flatbread', price: 240, kitchenId: 'kitchen_1' },
-  { id: generateId('item'), name: 'Cast Iron Cornbread', price: 120, kitchenId: 'kitchen_2' },
-  { id: generateId('item'), name: 'Ember Old Fashioned', price: 280, kitchenId: 'kitchen_3' }
-]
 
 // ---------------------------------------------------------------------------
 // Kitchens
 // ---------------------------------------------------------------------------
 
-export function getKitchens() {
-  const existing = localStorage.getItem(KITCHENS_KEY)
-  if (existing === null) {
-    safeWrite(KITCHENS_KEY, SEED_KITCHENS)
-    return SEED_KITCHENS
-  }
-  return safeParse(existing, [])
+export async function getKitchens() {
+  const { data, error } = await supabase.from('kitchens').select('*').order('name')
+  logError('getKitchens', error)
+  return data ?? []
 }
 
-export function addKitchen({ name }) {
-  const kitchens = getKitchens()
-  const kitchen = { id: generateId('kitchen'), name: name.trim() }
-  const next = [...kitchens, kitchen]
-  safeWrite(KITCHENS_KEY, next)
-  return next
+export async function addKitchen({ name }) {
+  const { error } = await supabase.from('kitchens').insert({ name: name.trim() })
+  logError('addKitchen', error)
+  return getKitchens()
 }
 
-export function updateKitchen(id, updates) {
-  const kitchens = getKitchens()
-  const next = kitchens.map((k) => (k.id === id ? { ...k, ...updates } : k))
-  safeWrite(KITCHENS_KEY, next)
-  return next
+export async function updateKitchen(id, updates) {
+  const { error } = await supabase.from('kitchens').update(updates).eq('id', id)
+  logError('updateKitchen', error)
+  return getKitchens()
 }
 
-export function deleteKitchen(id) {
-  const kitchens = getKitchens()
-  const next = kitchens.filter((k) => k.id !== id)
-  safeWrite(KITCHENS_KEY, next)
-
-  // Unassign this kitchen from any menu items / orders that referenced it,
-  // rather than leaving them pointing at a kitchen that no longer exists.
-  const menu = getMenu()
-  safeWrite(
-    MENU_KEY,
-    menu.map((item) => (item.kitchenId === id ? { ...item, kitchenId: null } : item))
-  )
-  const orders = getOrders()
-  safeWrite(
-    ORDERS_KEY,
-    orders.map((order) => (order.kitchenId === id ? { ...order, kitchenId: null } : order))
-  )
-
-  return next
+export async function deleteKitchen(id) {
+  // Menu items / orders referencing this kitchen have kitchen_id set to
+  // null automatically via the ON DELETE SET NULL foreign key (see schema).
+  const { error } = await supabase.from('kitchens').delete().eq('id', id)
+  logError('deleteKitchen', error)
+  return getKitchens()
 }
 
 // ---------------------------------------------------------------------------
 // Menu
 // ---------------------------------------------------------------------------
 
-export function getMenu() {
-  const existing = localStorage.getItem(MENU_KEY)
-  if (existing === null) {
-    safeWrite(MENU_KEY, SEED_MENU)
-    return SEED_MENU
-  }
-  return safeParse(existing, [])
+function rowToMenuItem(row) {
+  return { id: row.id, name: row.name, price: Number(row.price), kitchenId: row.kitchen_id }
 }
 
-export function addMenuItem({ name, price, kitchenId = null }) {
-  const menu = getMenu()
-  const item = {
-    id: generateId('item'),
-    name: name.trim(),
-    price: Number(price),
-    kitchenId
-  }
-  const next = [...menu, item]
-  safeWrite(MENU_KEY, next)
-  return next
+export async function getMenu() {
+  const { data, error } = await supabase.from('menu_items').select('*').order('name')
+  logError('getMenu', error)
+  return (data ?? []).map(rowToMenuItem)
 }
 
-export function updateMenuItem(id, updates) {
-  const menu = getMenu()
-  const next = menu.map((item) =>
-    item.id === id
-      ? {
-          ...item,
-          ...updates,
-          price: updates.price !== undefined ? Number(updates.price) : item.price
-        }
-      : item
-  )
-  safeWrite(MENU_KEY, next)
-  return next
+export async function addMenuItem({ name, price, kitchenId = null }) {
+  const { error } = await supabase
+    .from('menu_items')
+    .insert({ name: name.trim(), price: Number(price), kitchen_id: kitchenId || null })
+  logError('addMenuItem', error)
+  return getMenu()
 }
 
-export function deleteMenuItem(id) {
-  const menu = getMenu()
-  const next = menu.filter((item) => item.id !== id)
-  safeWrite(MENU_KEY, next)
-  return next
+export async function updateMenuItem(id, updates) {
+  const payload = {}
+  if (updates.name !== undefined) payload.name = updates.name.trim()
+  if (updates.price !== undefined) payload.price = Number(updates.price)
+  if (updates.kitchenId !== undefined) payload.kitchen_id = updates.kitchenId || null
+  const { error } = await supabase.from('menu_items').update(payload).eq('id', id)
+  logError('updateMenuItem', error)
+  return getMenu()
+}
+
+export async function deleteMenuItem(id) {
+  const { error } = await supabase.from('menu_items').delete().eq('id', id)
+  logError('deleteMenuItem', error)
+  return getMenu()
 }
 
 // ---------------------------------------------------------------------------
 // Orders
 // ---------------------------------------------------------------------------
 
-export function getOrders() {
-  const existing = localStorage.getItem(ORDERS_KEY)
-  return safeParse(existing, [])
+function rowToOrder(row) {
+  return {
+    id: row.id,
+    item: row.item,
+    quantity: row.quantity,
+    price: Number(row.price),
+    status: row.status,
+    timestamp: row.created_at,
+    kitchenId: row.kitchen_id
+  }
 }
 
-export function addOrder({ item, quantity, price, kitchenId = null }) {
-  const orders = getOrders()
-  const order = {
-    id: generateId('order'),
+export async function getOrders() {
+  const { data, error } = await supabase
+    .from('orders')
+    .select('*')
+    .order('created_at', { ascending: false })
+  logError('getOrders', error)
+  return (data ?? []).map(rowToOrder)
+}
+
+export async function addOrder({ item, quantity, price, kitchenId = null }) {
+  const { error } = await supabase.from('orders').insert({
     item: item.trim(),
     quantity: Number(quantity),
     price: Number(price),
     status: 'pending',
-    timestamp: new Date().toISOString(),
-    kitchenId
-  }
-  const next = [order, ...orders]
-  safeWrite(ORDERS_KEY, next)
-  return next
+    kitchen_id: kitchenId || null
+  })
+  logError('addOrder', error)
+  return getOrders()
 }
 
-export function updateOrder(id, updates) {
-  const orders = getOrders()
-  const next = orders.map((order) => (order.id === id ? { ...order, ...updates } : order))
-  safeWrite(ORDERS_KEY, next)
-  return next
+export async function updateOrder(id, updates) {
+  const payload = {}
+  if (updates.status !== undefined) payload.status = updates.status
+  if (updates.kitchenId !== undefined) payload.kitchen_id = updates.kitchenId || null
+  const { error } = await supabase.from('orders').update(payload).eq('id', id)
+  logError('updateOrder', error)
+  return getOrders()
 }
 
-export function deleteOrder(id) {
-  const orders = getOrders()
-  const next = orders.filter((order) => order.id !== id)
-  safeWrite(ORDERS_KEY, next)
-  return next
+export async function deleteOrder(id) {
+  const { error } = await supabase.from('orders').delete().eq('id', id)
+  logError('deleteOrder', error)
+  return getOrders()
 }
 
-export function markOrderCompleted(id) {
+export async function markOrderCompleted(id) {
   return updateOrder(id, { status: 'completed' })
+}
+
+/** Pending orders for a single kitchen, oldest first — used by the Kitchen Display. */
+export async function getKitchenOrders(kitchenId) {
+  const { data, error } = await supabase
+    .from('orders')
+    .select('*')
+    .eq('kitchen_id', kitchenId)
+    .eq('status', 'pending')
+    .order('created_at', { ascending: true })
+  logError('getKitchenOrders', error)
+  return (data ?? []).map(rowToOrder)
+}
+
+/**
+ * Subscribe to order changes for a single kitchen only (used by the Kitchen
+ * Display so it doesn't refetch/react to every other kitchen's activity).
+ * onInsert fires for brand-new orders (used to trigger the sound alert);
+ * onChange fires for any insert/update/delete affecting this kitchen.
+ */
+export function subscribeToKitchenOrders(kitchenId, { onInsert, onChange } = {}) {
+  const channel = supabase
+    .channel(`kitchen-orders-${kitchenId}-${Math.random().toString(36).slice(2)}`)
+    .on(
+      'postgres_changes',
+      { event: 'INSERT', schema: 'public', table: 'orders', filter: `kitchen_id=eq.${kitchenId}` },
+      (payload) => {
+        onInsert?.(payload)
+        onChange?.(payload)
+      }
+    )
+    .on(
+      'postgres_changes',
+      { event: 'UPDATE', schema: 'public', table: 'orders', filter: `kitchen_id=eq.${kitchenId}` },
+      (payload) => onChange?.(payload)
+    )
+    .subscribe()
+
+  return () => supabase.removeChannel(channel)
+}
+
+// ---------------------------------------------------------------------------
+// Realtime — lets every open tab/device react instantly to changes made
+// anywhere else, without polling.
+// ---------------------------------------------------------------------------
+
+/**
+ * Subscribe to all inserts/updates/deletes on a table.
+ * Returns an unsubscribe function — always call it in a useEffect cleanup.
+ */
+export function subscribeToTable(table, onChange) {
+  const channel = supabase
+    .channel(`${table}-changes-${Math.random().toString(36).slice(2)}`)
+    .on('postgres_changes', { event: '*', schema: 'public', table }, onChange)
+    .subscribe()
+
+  return () => {
+    supabase.removeChannel(channel)
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -210,9 +212,8 @@ export function orderTotal(order) {
   return order.quantity * order.price
 }
 
-export function getDashboardStats() {
-  const orders = getOrders()
-  const kitchens = getKitchens()
+export async function getDashboardStats() {
+  const [orders, kitchens] = await Promise.all([getOrders(), getKitchens()])
   const todayOrders = orders.filter((o) => isToday(o.timestamp))
   const totalOrdersToday = todayOrders.length
   const revenueToday = todayOrders.reduce((sum, o) => sum + orderTotal(o), 0)
@@ -229,8 +230,8 @@ export function getDashboardStats() {
   return { totalOrdersToday, revenueToday, activeOrders, activeByKitchen, unassignedActive }
 }
 
-export function getAnalytics() {
-  const orders = getOrders()
+export async function getAnalytics() {
+  const orders = await getOrders()
   const totalRevenueAllTime = orders.reduce((sum, o) => sum + orderTotal(o), 0)
 
   const countsByItem = orders.reduce((acc, o) => {
@@ -247,7 +248,6 @@ export function getAnalytics() {
     }
   }
 
-  // Last 7 days revenue, oldest -> newest, for the dashboard sparkline.
   const days = [...Array(7)].map((_, idx) => {
     const d = new Date()
     d.setDate(d.getDate() - (6 - idx))
@@ -268,4 +268,76 @@ export function getAnalytics() {
   })
 
   return { totalRevenueAllTime, mostOrderedItem, mostOrderedQty, revenueByDay }
+}
+
+// ---------------------------------------------------------------------------
+// Filtered sales analysis — pure functions (no network), used by the Admin
+// "Sales analysis" panel so filters recompute instantly against an
+// already-fetched order list.
+// ---------------------------------------------------------------------------
+
+/** rangeDays: 1 | 7 | 30 | null (null = all time) */
+export function filterOrders(orders, { kitchenId = 'all', rangeDays = null } = {}) {
+  let result = orders
+  if (kitchenId !== 'all') {
+    result = result.filter((o) => o.kitchenId === kitchenId)
+  }
+  if (rangeDays !== null) {
+    const cutoff = new Date()
+    cutoff.setDate(cutoff.getDate() - (rangeDays - 1))
+    cutoff.setHours(0, 0, 0, 0)
+    result = result.filter((o) => new Date(o.timestamp) >= cutoff)
+  }
+  return result
+}
+
+export function summarizeOrders(orders) {
+  const totalRevenue = orders.reduce((sum, o) => sum + orderTotal(o), 0)
+  const totalOrders = orders.length
+  const avgOrderValue = totalOrders > 0 ? totalRevenue / totalOrders : 0
+
+  const countsByItem = orders.reduce((acc, o) => {
+    acc[o.item] = (acc[o.item] || 0) + o.quantity
+    return acc
+  }, {})
+
+  const topItems = Object.entries(countsByItem)
+    .map(([name, qty]) => ({ name, qty }))
+    .sort((a, b) => b.qty - a.qty)
+    .slice(0, 5)
+
+  return {
+    totalRevenue,
+    totalOrders,
+    avgOrderValue,
+    mostOrderedItem: topItems[0]?.name ?? null,
+    mostOrderedQty: topItems[0]?.qty ?? 0,
+    topItems
+  }
+}
+
+/** Daily revenue bars for the given orders, over the last `days` days. */
+export function revenueByDayChart(orders, days = 7) {
+  const dayList = [...Array(days)].map((_, idx) => {
+    const d = new Date()
+    d.setDate(d.getDate() - (days - 1 - idx))
+    d.setHours(0, 0, 0, 0)
+    return d
+  })
+
+  return dayList.map((day) => {
+    const next = new Date(day)
+    next.setDate(next.getDate() + 1)
+    const total = orders
+      .filter((o) => {
+        const t = new Date(o.timestamp)
+        return t >= day && t < next
+      })
+      .reduce((sum, o) => sum + orderTotal(o), 0)
+    const label =
+      days > 7
+        ? day.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+        : day.toLocaleDateString(undefined, { weekday: 'short' })
+    return { label, total }
+  })
 }

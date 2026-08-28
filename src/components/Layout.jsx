@@ -1,5 +1,6 @@
 import { NavLink } from 'react-router-dom'
 import Sidebar from './Sidebar'
+import { useAuth } from '../context/AuthContext'
 
 const MOBILE_LINKS = [
   { to: '/', label: 'Dashboard' },
@@ -8,6 +9,10 @@ const MOBILE_LINKS = [
 ]
 
 export default function Layout({ children }) {
+  const { role } = useAuth()
+  const mobileLinks =
+    role === 'admin' ? [...MOBILE_LINKS, { to: '/admin', label: 'Admin' }] : MOBILE_LINKS
+
   return (
     <div className="flex min-h-screen bg-void bg-ember-glow">
       <Sidebar />
@@ -18,7 +23,7 @@ export default function Layout({ children }) {
         </main>
 
         <nav className="fixed inset-x-0 bottom-0 z-10 flex border-t border-rail bg-panel/95 backdrop-blur md:hidden">
-          {MOBILE_LINKS.map(({ to, label }) => (
+          {mobileLinks.map(({ to, label }) => (
             <NavLink
               key={to}
               to={to}

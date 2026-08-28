@@ -1,4 +1,6 @@
 import { NavLink } from 'react-router-dom'
+import { useAuth } from '../context/AuthContext'
+import { signOut } from '../utils/auth'
 
 const LINKS = [
   { to: '/', label: 'Dashboard', icon: FlameIcon },
@@ -9,6 +11,8 @@ const LINKS = [
 const ADMIN_LINK = { to: '/admin', label: 'Admin', icon: LockIcon }
 
 export default function Sidebar() {
+  const { user, role } = useAuth()
+
   return (
     <aside className="hidden w-60 shrink-0 flex-col border-r border-rail bg-panel px-4 py-6 md:flex">
       <div className="mb-8 flex items-center gap-2 px-2">
@@ -45,33 +49,38 @@ export default function Sidebar() {
             )}
           </NavLink>
         ))}
+
+        {role === 'admin' && (
+          <NavLink
+            to={ADMIN_LINK.to}
+            className={({ isActive }) =>
+              `group flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors ${
+                isActive
+                  ? 'bg-ember/12 text-ember'
+                  : 'text-paper/65 hover:bg-raised hover:text-paper'
+              }`
+            }
+          >
+            {({ isActive }) => (
+              <>
+                <LockIcon className={`h-4 w-4 ${isActive ? 'text-ember' : 'text-muted group-hover:text-paper/80'}`} />
+                {ADMIN_LINK.label}
+              </>
+            )}
+          </NavLink>
+        )}
       </nav>
 
       <div className="mt-auto flex flex-col gap-3">
-        <NavLink
-          to={ADMIN_LINK.to}
-          className={({ isActive }) =>
-            `group flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors ${
-              isActive
-                ? 'bg-ember/12 text-ember'
-                : 'text-paper/50 hover:bg-raised hover:text-paper/80'
-            }`
-          }
-        >
-          {({ isActive }) => (
-            <>
-              <LockIcon className={`h-4 w-4 ${isActive ? 'text-ember' : 'text-muted group-hover:text-paper/70'}`} />
-              {ADMIN_LINK.label}
-            </>
-          )}
-        </NavLink>
-
         <div className="rounded-lg border border-rail bg-raised/60 px-3 py-3">
-          <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted">Status</p>
-          <p className="mt-1 flex items-center gap-2 text-sm text-paper/80">
-            <span className="h-1.5 w-1.5 rounded-full bg-sage" />
-            Line running
-          </p>
+          <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted">Signed in</p>
+          <p className="mt-1 truncate text-sm text-paper/80">{user?.email}</p>
+          <button
+            onClick={signOut}
+            className="mt-2 font-mono text-[11px] uppercase tracking-wide text-muted hover:text-ember"
+          >
+            Sign out
+          </button>
         </div>
       </div>
     </aside>

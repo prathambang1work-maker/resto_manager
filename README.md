@@ -1,117 +1,161 @@
 # Embercard — Restaurant Manager
 
-A dark, kitchen-styled dashboard for small restaurants: orders, menu, and revenue, built as an installable PWA. No backend — everything persists to `localStorage`.
+A dark, kitchen-styled restaurant management app: orders, menu, kitchens, and business analytics, backed by a real shared database (Supabase/Postgres) so every device stays in sync automatically. Installable as a PWA.
 
 ## Stack
-React 18 (Vite) · Tailwind CSS · React Router · `vite-plugin-pwa`
+React 18 (Vite) · Tailwind CSS · React Router · Supabase (Postgres + Auth + Realtime) · `vite-plugin-pwa`
+
+---
+
+## One-time setup (do this before anything works)
+
+### 1. Create a Supabase project
+Go to [supabase.com](https://supabase.com), sign up free (no card required), and create a new project. Wait a minute or two for it to finish provisioning.
+
+### 2. Run the schema
+In your Supabase project: **SQL Editor → New query**, paste the entire contents of `supabase-schema.sql` from this repo, and run it. This creates the `kitchens`, `menu_items`, `orders`, and `profiles` tables, sets up Row Level Security, and enables realtime sync.
+
+*(If you already ran an older version of this schema for Phase 2, run `supabase-migration-phase3.sql` instead — it safely upgrades an existing project to add kitchen accounts.)*
+
+### 3. Get your API keys
+**Project Settings → API**. Copy the **Project URL** and the **anon public** key.
+
+### 4. Configure the app
+```bash
+cp .env.example .env
+```
+Paste your URL and anon key into `.env`:
+```
+VITE_SUPABASE_URL=https://your-project-ref.supabase.co
+VITE_SUPABASE_ANON_KEY=your-anon-public-key
+```
+
+For your live Netlify site, add the same two variables under **Site configuration → Environment variables**, then redeploy.
+
+### 5. Create your accounts
+Everyone needs a real login now — there's no more open/no-login mode. In Supabase: **Authentication → Users → Add user**, create an email + password for each person, and note the user's ID (the UUID Supabase assigns).
+
+Then, in **SQL Editor**, give each one a role:
+
+```sql
+-- Admin account (sees revenue, manages kitchens)
+insert into public.profiles (id, email, role)
+values ('paste-the-user-uuid-here', 'you@example.com', 'admin');
+
+-- Staff account (takes orders, edits menu — no revenue access)
+insert into public.profiles (id, email, role)
+values ('paste-the-user-uuid-here', 'staff@example.com', 'staff');
+
+-- Kitchen account (only sees + marks ready orders for ONE kitchen)
+insert into public.profiles (id, email, role, kitchen_id)
+values (
+  'paste-the-user-uuid-here',
+  'kitchen1@example.com',
+  'kitchen',
+  (select id from public.kitchens where name = 'Kitchen 1')
+);
+```
+
+Repeat the kitchen block once per kitchen (Kitchen 1 / 2 / 3 by default — see Admin to rename or add more).
+
+**Security note:** unlike the old Phase 1/2 version, this is now real authentication — Supabase handles passwords server-side, nothing sensitive lives in the browser. Row Level Security enforces who can read/write what at the database level, not just in the app's UI, so it holds up even if someone inspects network requests.
+
+---
+
+## Roles
+
+| Role | Can do |
+|---|---|
+| **admin** | Everything staff can, plus: revenue/sales analytics with filters, manage kitchens, change own password |
+| **staff** | Dashboard (operational view), take/manage orders, edit menu — no revenue access |
+| **kitchen** | Full-screen Kitchen Display only, showing pending orders for their one assigned kitchen, with a "Mark Ready" button and a sound alert on new orders |
+
+Everyone signs in at the same login screen — role and kitchen assignment are looked up automatically after login and determine what they see.
+
+## Kitchen Display
+
+A kitchen account is dropped straight into a big-button, tablet-friendly screen — no sidebar, no navigation, just their queue (Zomato/Swiggy-style). Tap **Enable order alerts** once per session (browsers require a tap before allowing sound) and a short chime plays automatically whenever a new order comes in for that kitchen — no polling, pushed live via Supabase Realtime. Tap **Mark Ready** to clear an order off their screen.
+
+There's no time limit or pickup-tracking step — marking an order ready is the final action for that kitchen.
+
+## Admin analytics
+
+Admin → **Sales analysis** lets you filter by date range (Today / 7 days / 30 days / All time) and by kitchen, recomputing revenue, order count, average order value, the revenue trend chart, and top-selling items live as you change filters.
+
+## Currency
+All amounts are formatted as Indian Rupees (₹) via `src/utils/currency.js`.
+
+---
 
 ## Project structure
 
 ```
 src/
-  components/     # Reusable, presentation-only UI (Button, Card, Sidebar, Layout, OrderTicket)
-  pages/          # Route-level screens (Dashboard, Orders, Menu, Admin) — compose components only
+  components/
+    Button, Card, Sidebar, Layout, OrderTicket   # presentation only
+    RequireAuth.jsx        # blocks the app behind login
+    RequireAdmin.jsx       # blocks /admin behind the admin role
+  context/
+    AuthContext.jsx        # tracks session + role + kitchenId app-wide
+  pages/
+    Login.jsx               # shared sign-in screen for every role
+    Dashboard.jsx            # staff/admin operational view
+    Orders.jsx, Menu.jsx     # staff/admin day-to-day
+    Admin.jsx                # kitchens, sales analysis, password change
+    Kitchen.jsx               # full-screen Kitchen Display (role: kitchen)
   utils/
-    storage.js    # ALL order/menu/kitchen business logic + localStorage access
-    auth.js       # Admin login/logout/credentials (client-side gate only, see below)
-    currency.js   # ₹ (INR) formatting helper
-  App.jsx         # Router + route table
-  main.jsx        # React entry point
+    supabaseClient.js        # Supabase client singleton
+    auth.js                  # sign in/out, profile lookup, password change
+    storage.js                # ALL data access + business logic (Supabase queries)
+    currency.js               # ₹ formatting
+    soundAlert.js              # generated chime for new kitchen orders
+  App.jsx                   # routes + role-based branching
+  main.jsx
 public/
-  icons/          # PWA icons (192, 512, 512 maskable)
-  favicon.svg
-  _redirects      # Netlify SPA rewrite rule
+  icons/, favicon.svg, _redirects
+supabase-schema.sql          # fresh-install database schema
+supabase-migration-phase3.sql # upgrade script for existing Phase 2 projects
+.env.example
 ```
-
-## Admin section
-
-Reachable at `#/admin` (the small lock icon at the bottom of the sidebar). Default login:
-
-```
-Email:    admin@embercard.app
-Password: admin123
-```
-
-**Change this immediately after first login** (Admin → Admin credentials).
-
-From the Admin panel you can:
-- View revenue (today, all-time, 7-day trend) and the most-ordered item — this business data lives only here, not on the open Dashboard
-- Add, rename, or delete kitchens
-- Change the admin email/password
-
-**Security note:** this app has no backend, so the admin login is a client-side convenience gate only — credentials and the "logged in" flag are stored in the browser's `localStorage`, which is readable/editable via devtools. It stops casual access to revenue and kitchen setup but is **not real security**. Don't rely on it to protect anything sensitive; a genuine login needs a server-side auth system.
-
-## Dashboard (open, no login)
-
-Shows operational data only: orders today (count), active orders, and live kitchen workload. No revenue or financial figures — those are admin-only (see above).
-
-## Kitchens & orders
-
-- Kitchens are managed in Admin. Three are seeded by default: Kitchen 1, Kitchen 2, Kitchen 3.
-- Each menu item can have a default kitchen (set in Menu). Picking that item from "Quick add from menu" on the Orders page auto-fills its kitchen — the manager can still override it per order.
-- The Orders page has a kitchen filter, and the Dashboard shows live active-order counts per kitchen.
-
-## Currency
-
-All amounts are formatted as Indian Rupees (₹) via `src/utils/currency.js`, using `Intl.NumberFormat('en-IN', ...)` for correct Indian digit grouping.
-
-Each file has one job, so a bug in "can't delete an order" is always in `utils/storage.js` or `OrderTicket.jsx` — never buried in a 500-line component.
 
 ## Run locally
-
 ```bash
 npm install
 npm run dev        # http://localhost:5173
 ```
 
 ## Build
-
 ```bash
 npm run build       # outputs to dist/
 npm run preview     # serve the production build locally
 ```
 
 ## Deploy (Netlify)
-
-1. Push this repo to GitHub (see below).
+1. Push this repo to GitHub.
 2. In Netlify: **New site from Git** → pick the repo.
 3. Build command: `npm run build` · Publish directory: `dist`
-4. Netlify picks up `public/_redirects` automatically for SPA routing.
-
-## Push to GitHub
-
-```bash
-git init
-git add .
-git commit -m "Initial commit: Embercard restaurant dashboard"
-git branch -M main
-git remote add origin <your-repo-url>
-git push -u origin main
-```
-
-Because every concern lives in its own file, future commits stay small and reviewable, e.g.:
-
-```bash
-git commit -m "fix(orders): correct total calc in OrderTicket"
-git commit -m "feat(menu): add inline edit for menu items"
-```
+4. Add `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` under Site configuration → Environment variables.
+5. Deploy. `public/_redirects` is already set up for SPA routing.
 
 ## Data model
 
 ```ts
-// Order
-{ id, item, quantity, price, status: "pending" | "completed", timestamp, kitchenId: string | null }
+// orders table
+{ id, item, quantity, price, status: "pending" | "completed", created_at, kitchen_id }
 
-// Menu item
-{ id, name, price, kitchenId: string | null }
+// menu_items table
+{ id, name, price, kitchen_id }
 
-// Kitchen
+// kitchens table
 { id, name }
+
+// profiles table (one row per login)
+{ id, email, role: "staff" | "admin" | "kitchen", kitchen_id }
 ```
 
 ## Debugging tips
-
-- All reads/writes to `localStorage` funnel through `src/utils/storage.js` — set a breakpoint there first.
-- Each page (`Dashboard`, `Orders`, `Menu`) only calls functions from `storage.js` and renders components; it holds no persistence logic itself.
-- `OrderTicket.jsx` is the only place order totals are rendered — check there if numbers look wrong.
-- To reset all demo data, clear `localStorage` keys `embercard:orders` and `embercard:menu` in devtools.
+- All data access goes through `src/utils/storage.js` — every function is `async` and talks to Supabase. Set a breakpoint there first.
+- If the app shows "Supabase isn't configured yet" — your `.env` (local) or Netlify environment variables (live) are missing or misnamed.
+- If a kitchen account signs in but sees "No kitchen assigned" — its `profiles.kitchen_id` wasn't set. Fix with the SQL in step 5 above.
+- If orders/menu changes don't appear on another device — check the Supabase dashboard's **Database → Replication** page to confirm `orders`, `menu_items`, and `kitchens` are enabled for realtime (the schema script does this automatically, but worth checking if you edited RLS by hand).
+- Browser blocks the kitchen alert sound until a tap happens on the page — that's why there's an "Enable order alerts" button, not automatic playback.

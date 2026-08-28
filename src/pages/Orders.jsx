@@ -9,7 +9,8 @@ import {
   deleteOrder,
   markOrderCompleted,
   getMenu,
-  getKitchens
+  getKitchens,
+  subscribeToTable
 } from '../utils/storage'
 
 const EMPTY_FORM = { item: '', quantity: 1, price: '', kitchenId: '' }
@@ -18,15 +19,28 @@ export default function Orders() {
   const [orders, setOrders] = useState([])
   const [menu, setMenu] = useState([])
   const [kitchens, setKitchens] = useState([])
+  const [loading, setLoading] = useState(true)
   const [form, setForm] = useState(EMPTY_FORM)
   const [errors, setErrors] = useState({})
   const [statusFilter, setStatusFilter] = useState('all')
   const [kitchenFilter, setKitchenFilter] = useState('all')
 
+  async function refreshOrders() {
+    setOrders(await getOrders())
+  }
+
   useEffect(() => {
-    setOrders(getOrders())
-    setMenu(getMenu())
-    setKitchens(getKitchens())
+    async function init() {
+      const [o, m, k] = await Promise.all([getOrders(), getMenu(), getKitchens()])
+      setOrders(o)
+      setMenu(m)
+      setKitchens(k)
+      setLoading(false)
+    }
+    init()
+
+    const unsub = subscribeToTable('orders', refreshOrders)
+    return unsub
   }, [])
 
   const kitchenName = (id) => kitchens.find((k) => k.id === id)?.name ?? 'Unassigned'
@@ -50,10 +64,10 @@ export default function Orders() {
     return Object.keys(next).length === 0
   }
 
-  function handleSubmit(e) {
+  async function handleSubmit(e) {
     e.preventDefault()
     if (!validate()) return
-    const next = addOrder({ ...form, kitchenId: form.kitchenId || null })
+    const next = await addOrder({ ...form, kitchenId: form.kitchenId || null })
     setOrders(next)
     setForm(EMPTY_FORM)
   }
@@ -70,12 +84,12 @@ export default function Orders() {
     }
   }
 
-  function handleComplete(id) {
-    setOrders(markOrderCompleted(id))
+  async function handleComplete(id) {
+    setOrders(await markOrderCompleted(id))
   }
 
-  function handleDelete(id) {
-    setOrders(deleteOrder(id))
+  async function handleDelete(id) {
+    setOrders(await deleteOrder(id))
   }
 
   const total = (Number(form.quantity) || 0) * (Number(form.price) || 0)
@@ -86,7 +100,7 @@ export default function Orders() {
         <p className="font-mono text-xs uppercase tracking-[0.14em] text-ember">Orders</p>
         <h1 className="font-display text-3xl text-paper">Ticket rail</h1>
         <p className="mt-1 text-sm text-paper/60">
-          Fire new orders, route them to a kitchen, and clear them as they go out.
+          Fire new orders, route them to a kitchen, and clear them as they go out — synced live across every device.
         </p>
       </header>
 
@@ -214,7 +228,9 @@ export default function Orders() {
       </div>
 
       <div className="flex flex-col gap-3">
-        {filteredOrders.length === 0 ? (
+        {loading ? (
+          <p className="text-sm text-muted">Loading…</p>
+        ) : filteredOrders.length === 0 ? (
           <EmptyState filter={statusFilter} />
         ) : (
           filteredOrders.map((order) => (

@@ -1,141 +1,90 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import Card from '../components/Card'
 import Button from '../components/Button'
-import {
-  isAdminAuthenticated,
-  loginAdmin,
-  logoutAdmin,
-  getAdminCredentials,
-  updateAdminCredentials
-} from '../utils/auth'
-import { getKitchens, addKitchen, updateKitchen, deleteKitchen, getDashboardStats, getAnalytics } from '../utils/storage'
 import { formatINR } from '../utils/currency'
+import { useAuth } from '../context/AuthContext'
+import { signOut, updateOwnPassword } from '../utils/auth'
+import {
+  getKitchens,
+  addKitchen,
+  updateKitchen,
+  deleteKitchen,
+  getOrders,
+  filterOrders,
+  summarizeOrders,
+  revenueByDayChart,
+  subscribeToTable
+} from '../utils/storage'
+
+const RANGE_OPTIONS = [
+  { value: '1', label: 'Today' },
+  { value: '7', label: 'Last 7 days' },
+  { value: '30', label: 'Last 30 days' },
+  { value: 'all', label: 'All time' }
+]
 
 export default function Admin() {
-  const [authed, setAuthed] = useState(isAdminAuthenticated())
+  const { user } = useAuth()
 
-  return authed ? (
-    <AdminPanel onLogout={() => setAuthed(false)} />
-  ) : (
-    <AdminLogin onSuccess={() => setAuthed(true)} />
-  )
-}
-
-// ---------------------------------------------------------------------------
-// Login screen
-// ---------------------------------------------------------------------------
-
-function AdminLogin({ onSuccess }) {
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-  const [error, setError] = useState('')
-
-  function handleSubmit(e) {
-    e.preventDefault()
-    const ok = loginAdmin(email, password)
-    if (ok) {
-      setError('')
-      onSuccess()
-    } else {
-      setError('Incorrect email or password.')
-    }
-  }
-
-  return (
-    <div className="mx-auto flex max-w-sm flex-col gap-6 pt-10">
-      <header>
-        <p className="font-mono text-xs uppercase tracking-[0.14em] text-ember">Admin</p>
-        <h1 className="font-display text-3xl text-paper">Sign in</h1>
-        <p className="mt-1 text-sm text-paper/60">
-          Manage kitchens and admin credentials.
-        </p>
-      </header>
-
-      <Card>
-        <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-          <div>
-            <label className="mb-1 block font-mono text-[11px] uppercase tracking-wide text-muted">
-              Email
-            </label>
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="admin@embercard.app"
-              autoComplete="username"
-              className="w-full rounded-md border border-rail bg-raised px-3 py-2 text-sm text-paper placeholder:text-muted focus:border-ember focus:outline-none"
-            />
-          </div>
-          <div>
-            <label className="mb-1 block font-mono text-[11px] uppercase tracking-wide text-muted">
-              Password
-            </label>
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              autoComplete="current-password"
-              className="w-full rounded-md border border-rail bg-raised px-3 py-2 text-sm text-paper focus:border-ember focus:outline-none"
-            />
-          </div>
-          {error && <p className="text-xs text-chili">{error}</p>}
-          <Button type="submit" variant="primary" className="w-full">
-            Sign in
-          </Button>
-        </form>
-      </Card>
-
-      <p className="text-center font-mono text-[11px] text-muted">
-        Default: admin@embercard.app / admin123 — change this after signing in.
-        <br />
-        This is a browser-only lock, not real security.
-      </p>
-    </div>
-  )
-}
-
-// ---------------------------------------------------------------------------
-// Panel (post-login)
-// ---------------------------------------------------------------------------
-
-function AdminPanel({ onLogout }) {
   const [kitchens, setKitchens] = useState([])
   const [newKitchenName, setNewKitchenName] = useState('')
   const [editingId, setEditingId] = useState(null)
   const [editDraft, setEditDraft] = useState('')
 
-  const [credEmail, setCredEmail] = useState('')
-  const [credPassword, setCredPassword] = useState('')
-  const [credConfirm, setCredConfirm] = useState('')
-  const [credError, setCredError] = useState('')
-  const [credSuccess, setCredSuccess] = useState('')
+  const [orders, setOrders] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [rangeFilter, setRangeFilter] = useState('7')
+  const [kitchenFilter, setKitchenFilter] = useState('all')
 
-  const [revenueToday, setRevenueToday] = useState(0)
-  const [analytics, setAnalytics] = useState({
-    totalRevenueAllTime: 0,
-    mostOrderedItem: null,
-    mostOrderedQty: 0,
-    revenueByDay: []
-  })
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [passwordError, setPasswordError] = useState('')
+  const [passwordSuccess, setPasswordSuccess] = useState('')
 
-  useEffect(() => {
-    setKitchens(getKitchens())
-    setCredEmail(getAdminCredentials().email)
-    setRevenueToday(getDashboardStats().revenueToday)
-    setAnalytics(getAnalytics())
-  }, [])
-
-  const maxDay = Math.max(1, ...analytics.revenueByDay.map((d) => d.total))
-
-  function handleLogout() {
-    logoutAdmin()
-    onLogout()
+  async function refreshKitchens() {
+    setKitchens(await getKitchens())
   }
 
-  function handleAddKitchen(e) {
+  async function refreshOrders() {
+    setOrders(await getOrders())
+  }
+
+  useEffect(() => {
+    async function init() {
+      await Promise.all([refreshKitchens(), refreshOrders()])
+      setLoading(false)
+    }
+    init()
+
+    const unsubKitchens = subscribeToTable('kitchens', refreshKitchens)
+    const unsubOrders = subscribeToTable('orders', refreshOrders)
+    return () => {
+      unsubKitchens()
+      unsubOrders()
+    }
+  }, [])
+
+  const rangeDays = rangeFilter === 'all' ? null : Number(rangeFilter)
+
+  const filtered = useMemo(
+    () => filterOrders(orders, { kitchenId: kitchenFilter, rangeDays }),
+    [orders, kitchenFilter, rangeDays]
+  )
+  const summary = useMemo(() => summarizeOrders(filtered), [filtered])
+  const chartDays = rangeDays && rangeDays <= 30 ? rangeDays : 30
+  const chart = useMemo(() => revenueByDayChart(filtered, Math.max(chartDays, 2)), [filtered, chartDays])
+  const maxDay = Math.max(1, ...chart.map((d) => d.total))
+
+  const todayRevenue = useMemo(
+    () => summarizeOrders(filterOrders(orders, { rangeDays: 1 })).totalRevenue,
+    [orders]
+  )
+  const allTimeRevenue = useMemo(() => summarizeOrders(orders).totalRevenue, [orders])
+
+  async function handleAddKitchen(e) {
     e.preventDefault()
     if (!newKitchenName.trim()) return
-    setKitchens(addKitchen({ name: newKitchenName }))
+    setKitchens(await addKitchen({ name: newKitchenName }))
     setNewKitchenName('')
   }
 
@@ -144,37 +93,36 @@ function AdminPanel({ onLogout }) {
     setEditDraft(kitchen.name)
   }
 
-  function saveEdit(id) {
+  async function saveEdit(id) {
     if (!editDraft.trim()) return
-    setKitchens(updateKitchen(id, { name: editDraft.trim() }))
+    setKitchens(await updateKitchen(id, { name: editDraft.trim() }))
     setEditingId(null)
   }
 
-  function handleDeleteKitchen(id) {
-    setKitchens(deleteKitchen(id))
+  async function handleDeleteKitchen(id) {
+    setKitchens(await deleteKitchen(id))
   }
 
-  function handleCredentialsSubmit(e) {
+  async function handlePasswordSubmit(e) {
     e.preventDefault()
-    setCredError('')
-    setCredSuccess('')
-
-    if (credPassword && credPassword !== credConfirm) {
-      setCredError('Passwords do not match.')
+    setPasswordError('')
+    setPasswordSuccess('')
+    if (newPassword.length < 6) {
+      setPasswordError('Password must be at least 6 characters.')
       return
     }
-    if (!credEmail.trim()) {
-      setCredError('Email cannot be empty.')
+    if (newPassword !== confirmPassword) {
+      setPasswordError('Passwords do not match.')
       return
     }
-
-    updateAdminCredentials({
-      email: credEmail,
-      password: credPassword || undefined
-    })
-    setCredPassword('')
-    setCredConfirm('')
-    setCredSuccess('Credentials updated.')
+    const result = await updateOwnPassword(newPassword)
+    if (!result.ok) {
+      setPasswordError(result.error)
+      return
+    }
+    setNewPassword('')
+    setConfirmPassword('')
+    setPasswordSuccess('Password updated.')
   }
 
   return (
@@ -182,49 +130,110 @@ function AdminPanel({ onLogout }) {
       <header className="flex items-start justify-between gap-4">
         <div>
           <p className="font-mono text-xs uppercase tracking-[0.14em] text-ember">Admin</p>
-          <h1 className="font-display text-3xl text-paper">Kitchen &amp; access setup</h1>
-          <p className="mt-1 text-sm text-paper/60">
-            Manage kitchen stations and admin sign-in credentials.
-          </p>
+          <h1 className="font-display text-3xl text-paper">Kitchen &amp; business overview</h1>
+          <p className="mt-1 text-sm text-paper/60">Signed in as {user?.email}</p>
         </div>
-        <Button variant="ghost" onClick={handleLogout}>
+        <Button variant="ghost" onClick={signOut}>
           Log out
         </Button>
       </header>
 
-      <Card eyebrow="Business insights" title="Revenue">
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <div>
-            <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-muted">Today</p>
-            <p className="mt-1 font-display text-2xl text-paper">{formatINR(revenueToday)}</p>
+      {loading ? (
+        <p className="text-sm text-muted">Loading…</p>
+      ) : (
+        <>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <Card eyebrow="Quick glance" title="Revenue today" value={formatINR(todayRevenue)} />
+            <Card eyebrow="Quick glance" title="Revenue all-time" value={formatINR(allTimeRevenue)} />
           </div>
-          <div>
-            <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-muted">All time</p>
-            <p className="mt-1 font-display text-2xl text-paper">
-              {formatINR(analytics.totalRevenueAllTime)}
-            </p>
-          </div>
-        </div>
 
-        <div className="mt-6 flex h-28 items-end gap-3">
-          {analytics.revenueByDay.map((day, idx) => (
-            <div key={idx} className="flex flex-1 flex-col items-center gap-2">
-              <div
-                className="w-full rounded-t-sm bg-ember/80 transition-all"
-                style={{ height: `${Math.max(4, (day.total / maxDay) * 100)}%` }}
-                title={formatINR(day.total)}
-              />
-              <span className="font-mono text-[10px] uppercase text-muted">{day.label}</span>
+          <Card eyebrow="Business insights" title="Sales analysis">
+            <div className="flex flex-wrap items-center gap-3">
+              <select
+                value={rangeFilter}
+                onChange={(e) => setRangeFilter(e.target.value)}
+                className="rounded-md border border-rail bg-raised px-3 py-2 text-sm text-paper focus:border-ember focus:outline-none"
+              >
+                {RANGE_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+
+              <select
+                value={kitchenFilter}
+                onChange={(e) => setKitchenFilter(e.target.value)}
+                className="rounded-md border border-rail bg-raised px-3 py-2 text-sm text-paper focus:border-ember focus:outline-none"
+              >
+                <option value="all">All kitchens</option>
+                {kitchens.map((k) => (
+                  <option key={k.id} value={k.id}>
+                    {k.name}
+                  </option>
+                ))}
+              </select>
             </div>
-          ))}
-        </div>
-      </Card>
 
-      <Card eyebrow="Business insights" title="Most ordered item" value={analytics.mostOrderedItem ?? '—'}>
-        {analytics.mostOrderedItem && (
-          <p className="mt-1 font-mono text-xs text-muted">{analytics.mostOrderedQty} sold all-time</p>
-        )}
-      </Card>
+            <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-3">
+              <div>
+                <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-muted">Revenue</p>
+                <p className="mt-1 font-display text-2xl text-paper">
+                  {formatINR(summary.totalRevenue)}
+                </p>
+              </div>
+              <div>
+                <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-muted">Orders</p>
+                <p className="mt-1 font-display text-2xl text-paper">{summary.totalOrders}</p>
+              </div>
+              <div>
+                <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-muted">
+                  Avg order value
+                </p>
+                <p className="mt-1 font-display text-2xl text-paper">
+                  {formatINR(summary.avgOrderValue)}
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-6 flex h-28 items-end gap-2 overflow-x-auto">
+              {chart.map((day, idx) => (
+                <div key={idx} className="flex min-w-[24px] flex-1 flex-col items-center gap-2">
+                  <div
+                    className="w-full rounded-t-sm bg-ember/80 transition-all"
+                    style={{ height: `${Math.max(4, (day.total / maxDay) * 100)}%` }}
+                    title={formatINR(day.total)}
+                  />
+                  <span className="font-mono text-[9px] uppercase text-muted">{day.label}</span>
+                </div>
+              ))}
+            </div>
+
+            {summary.topItems.length > 0 && (
+              <div className="mt-6">
+                <p className="mb-2 font-mono text-[11px] uppercase tracking-[0.14em] text-muted">
+                  Top items in this range
+                </p>
+                <div className="flex flex-col gap-1.5">
+                  {summary.topItems.map((item) => (
+                    <div
+                      key={item.name}
+                      className="flex items-center justify-between rounded-md border border-rail bg-raised px-3 py-1.5"
+                    >
+                      <p className="text-sm text-paper/80">{item.name}</p>
+                      <p className="font-mono text-xs text-ember">{item.qty} sold</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {summary.totalOrders === 0 && (
+              <p className="mt-6 text-sm text-muted">No orders in this range.</p>
+            )}
+          </Card>
+        </>
+      )}
 
       <Card title="Kitchens">
         <form onSubmit={handleAddKitchen} className="flex gap-2">
@@ -283,19 +292,8 @@ function AdminPanel({ onLogout }) {
         </div>
       </Card>
 
-      <Card title="Admin credentials">
-        <form onSubmit={handleCredentialsSubmit} className="flex flex-col gap-4">
-          <div>
-            <label className="mb-1 block font-mono text-[11px] uppercase tracking-wide text-muted">
-              Email
-            </label>
-            <input
-              type="email"
-              value={credEmail}
-              onChange={(e) => setCredEmail(e.target.value)}
-              className="w-full rounded-md border border-rail bg-raised px-3 py-2 text-sm text-paper focus:border-ember focus:outline-none"
-            />
-          </div>
+      <Card title="Change my password">
+        <form onSubmit={handlePasswordSubmit} className="flex flex-col gap-4">
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
               <label className="mb-1 block font-mono text-[11px] uppercase tracking-wide text-muted">
@@ -303,10 +301,9 @@ function AdminPanel({ onLogout }) {
               </label>
               <input
                 type="password"
-                value={credPassword}
-                onChange={(e) => setCredPassword(e.target.value)}
-                placeholder="Leave blank to keep current"
-                className="w-full rounded-md border border-rail bg-raised px-3 py-2 text-sm text-paper placeholder:text-muted focus:border-ember focus:outline-none"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                className="w-full rounded-md border border-rail bg-raised px-3 py-2 text-sm text-paper focus:border-ember focus:outline-none"
               />
             </div>
             <div>
@@ -315,18 +312,21 @@ function AdminPanel({ onLogout }) {
               </label>
               <input
                 type="password"
-                value={credConfirm}
-                onChange={(e) => setCredConfirm(e.target.value)}
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
                 className="w-full rounded-md border border-rail bg-raised px-3 py-2 text-sm text-paper focus:border-ember focus:outline-none"
               />
             </div>
           </div>
-          {credError && <p className="text-xs text-chili">{credError}</p>}
-          {credSuccess && <p className="text-xs text-sage">{credSuccess}</p>}
+          {passwordError && <p className="text-xs text-chili">{passwordError}</p>}
+          {passwordSuccess && <p className="text-xs text-sage">{passwordSuccess}</p>}
           <Button type="submit" variant="primary" className="w-fit">
-            Save credentials
+            Update password
           </Button>
         </form>
+        <p className="mt-4 font-mono text-[11px] text-muted">
+          To add or remove staff/admin/kitchen accounts, use the Supabase dashboard — see README.
+        </p>
       </Card>
     </div>
   )
